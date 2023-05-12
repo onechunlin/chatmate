@@ -3,12 +3,19 @@ import chalk from "chalk";
 import ora from "ora";
 import { Transform, TransformCallback } from "stream";
 
-type Message = {
+interface Message {
   role: "user" | "assistant" | "system";
   content: string;
 };
 
 type Callback = (content: string) => void;
+
+interface ChatOption {
+  /** OpenApi 的 Key */
+  apiKey: string;
+  /** 温度。0-2 之间，可以理解为思维发散程度，值越高结果会更加随机，反之更加集中和确定 */ 
+  temperature?: number;
+};
 
 const spinner = ora({
   prefixText: chalk.gray("\n请求数据中，请稍后"),
@@ -61,14 +68,14 @@ class DataTransform extends Transform {
 
 class LimitQueue {
   private capacity: number;
-  private queue: unknown[];
+  private queue: Message[];
 
   constructor(capacity: number) {
     this.capacity = capacity;
     this.queue = [];
   }
 
-  enqueue(item: unknown) {
+  enqueue(item: Message) {
     if (this.queue.length === this.capacity) {
       // 如果队列已满，删除队首元素
       this.queue.shift();
@@ -86,8 +93,11 @@ class LimitQueue {
 class ChatGptClient {
   private key: string;
   private messageQueue: LimitQueue;
+  private temperature: number;
 
-  constructor(apiKey: string) {
+  constructor(option: ChatOption) {
+    const { apiKey, temperature } = option;
+    this.temperature = temperature || 0.7;
     this.key = apiKey.trim();
     // 仅保留 5 条上下文信息，防止堆栈溢出
     this.messageQueue = new LimitQueue(5);
@@ -103,6 +113,7 @@ class ChatGptClient {
         {
           model: "gpt-3.5-turbo",
           messages: this.messageQueue.getQueue(),
+          temperature: this.temperature,
           stream: true,
         },
         {
@@ -170,4 +181,4 @@ function safeParse(str: string): Record<string, any> {
   return obj;
 }
 
-export { ChatGptClient, safeParse };
+export { ChatGptClient };
