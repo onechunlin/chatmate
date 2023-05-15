@@ -2,17 +2,15 @@ import axios from "axios";
 import chalk from "chalk";
 import ora from "ora";
 import { Transform, TransformCallback } from "stream";
-
-interface Message {
-  role: "user" | "assistant" | "system";
-  content: string;
-};
+import { Message, ROLES } from "./role";
 
 type Callback = (content: string) => void;
 
 interface ChatOption {
   /** OpenApi 的 Key */
   apiKey: string;
+  /** 扮演的角色 */
+  role?: string;
   /** 温度。0-2 之间，可以理解为思维发散程度，值越高结果会更加随机，反之更加集中和确定 */ 
   temperature?: number;
 };
@@ -93,26 +91,33 @@ class LimitQueue {
 class ChatGptClient {
   private key: string;
   private messageQueue: LimitQueue;
+  private systemPrompt?: string;
   private temperature: number;
 
   constructor(option: ChatOption) {
-    const { apiKey, temperature } = option;
+    const { apiKey, temperature, role } = option;
     this.temperature = temperature || 0.7;
     this.key = apiKey.trim();
     // 仅保留 5 条上下文信息，防止堆栈溢出
     this.messageQueue = new LimitQueue(5);
+    this.systemPrompt = ROLES.find(item => item.act === role)?.prompt;
+    if (this.systemPrompt) {
+      console.log(`\n${chalk.bold.yellow("系统消息: ")}${chalk.gray(this.systemPrompt)}\n`);
+    }
   }
 
   public async createChatCompletion(content: string): Promise<void> {
     // 将用户发送信息放进消息队列
     this.messageQueue.enqueue({ role: "user", content });
     spinner.start();
+    // 如果有系统消息则带上
+    const messages: Message[] = this.systemPrompt ? [{ role: 'system', content: this.systemPrompt }, ...this.messageQueue.getQueue()] : this.messageQueue.getQueue();
     const result = await axios
       .post(
         "https://api.openai.com/v1/chat/completions",
         {
           model: "gpt-3.5-turbo",
-          messages: this.messageQueue.getQueue(),
+          messages,
           temperature: this.temperature,
           stream: true,
         },

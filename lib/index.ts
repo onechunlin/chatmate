@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 
 import inquirer from "inquirer";
+// @ts-ignore
+import inquirerPrompt from 'inquirer-autocomplete-prompt';
 import fs from "fs";
 import { ChatGptClient } from "./util";
 import { errorLog, successLog, warningLog } from "./ui";
+import { NORMAL, ROLES } from "./role";
+
+// 注册 autocomplete 类型
+inquirer.registerPrompt('autocomplete', inquirerPrompt);
 
 const CONFIG_DIR = `${process.env.HOME}/.chatmate`;
 const KEY_FILE_PATH = `${CONFIG_DIR}/open_api_keys`;
@@ -12,10 +18,11 @@ async function main() {
   console.log("欢迎使用 Chatmate！\n");
 
   // 获取初始化参数
-  const { openApiKey, temperature } = await getInitConfig();
+  const { openApiKey, temperature, role } = await getInitConfig();
   const client = new ChatGptClient({
     apiKey: openApiKey,
-    temperature
+    temperature,
+    role
   });
   await startConversation(client);
 }
@@ -41,6 +48,7 @@ async function startConversation(client: ChatGptClient) {
 async function getInitConfig(): Promise<{
   openApiKey: string;
   temperature: number;
+  role: string;
 }> {
   // 如果配置文件夹不存在则创建
   if (!fs.existsSync(CONFIG_DIR)) {
@@ -48,7 +56,7 @@ async function getInitConfig(): Promise<{
   }
   const openApiKey = await getApiKey();
   // 用户输入思维发散程度和其他信息
-  const { temperature } = await inquirer.prompt<{ temperature: number }>([
+  const { temperature, role } = await inquirer.prompt<{ temperature: number, role: string }>([
     {
       type: "number",
       name: "temperature",
@@ -62,11 +70,25 @@ async function getInitConfig(): Promise<{
         return true;
       },
     },
+    {
+      type: "autocomplete",
+      name: "role",
+      default: NORMAL,
+      message: "期望 GPT 扮演的角色（可输入关键词搜索）",
+      source: (_: unknown, input: string) => {
+        return ROLES.filter(item => item.act.match(input)).map(role => ({
+          name: role.act,
+          value: role.act
+        }))
+      }
+      
+    },
   ]);
 
   return {
     openApiKey,
-    temperature
+    temperature,
+    role
   }
 }
 
