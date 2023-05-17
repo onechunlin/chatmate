@@ -6,7 +6,7 @@
 
 ## 效果展示
 
-![效果展示](./images/chatmate-result.gif)
+![效果展示](./images/result.gif)
 
 ## 🛫 使用前提
 
