@@ -1,6 +1,6 @@
 {
   "name": "chatmate",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "可以让你在命令行使用 ChatGPT 的工具",
   "keywords": [
     "chatgpt",
@@ -45,7 +45,13 @@
     "@types/inquirer": "^9.0.3",
     "@types/node": "^18.14.6",
     "@types/ora": "^3.2.0",
+    "@typescript-eslint/eslint-plugin": "^5.43.0",
+    "eslint": "^8.0.1",
+    "eslint-config-standard-with-typescript": "^34.0.1",
+    "eslint-plugin-import": "^2.25.2",
+    "eslint-plugin-n": "^15.0.0",
+    "eslint-plugin-promise": "^6.0.0",
     "ts-node": "^10.9.1",
-    "typescript": "^4.9.5"
+    "typescript": "*"
   }
 }
