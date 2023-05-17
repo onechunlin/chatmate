@@ -1,89 +1,90 @@
 #!/usr/bin/env node
 
-import inquirer from "inquirer";
-// @ts-ignore
-import inquirerPrompt from 'inquirer-autocomplete-prompt';
-import fs from "fs";
-import { ChatGptClient } from "./util";
-import { errorLog, successLog, warningLog } from "./ui";
-import { NORMAL, ROLES } from "./role";
+import inquirer from 'inquirer'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-expect-error
+import inquirerPrompt from 'inquirer-autocomplete-prompt'
+import fs from 'fs'
+import { ChatGptClient } from './util'
+import { errorLog, successLog, warningLog } from './ui'
+import { NORMAL, ROLES } from './role'
 
 // 注册 autocomplete 类型
-inquirer.registerPrompt('autocomplete', inquirerPrompt);
+inquirer.registerPrompt('autocomplete', inquirerPrompt)
 
-const CONFIG_DIR = `${process.env.HOME}/.chatmate`;
-const KEY_FILE_PATH = `${CONFIG_DIR}/open_api_keys`;
+const CONFIG_DIR = `${process.env.HOME as string}/.chatmate`
+const KEY_FILE_PATH = `${CONFIG_DIR}/open_api_keys`
 
-async function main() {
-  console.log("欢迎使用 Chatmate！\n");
+async function main (): Promise<void> {
+  console.log('欢迎使用 Chatmate！\n')
 
   // 获取初始化参数
-  const { openApiKey, temperature, role } = await getInitConfig();
+  const { openApiKey, temperature, role } = await getInitConfig()
   const client = new ChatGptClient({
     apiKey: openApiKey,
     temperature,
     role
-  });
-  await startConversation(client);
+  })
+  await startConversation(client)
 }
 
-async function startConversation(client: ChatGptClient) {
+async function startConversation (client: ChatGptClient): Promise<void> {
   try {
     const { question } = await inquirer.prompt<{ question: string }>([
       {
-        type: "input",
-        name: "question",
-        message: "请输入您的问题：",
-      },
-    ]);
+        type: 'input',
+        name: 'question',
+        message: '请输入您的问题：'
+      }
+    ])
 
-    await client.createChatCompletion(question);
-    await startConversation(client);
+    await client.createChatCompletion(question)
+    await startConversation(client)
   } catch (error) {
-    errorLog(error instanceof Error ? error.message : "出错啦！");
-    await startConversation(client);
+    errorLog(error instanceof Error ? error.message : '出错啦！')
+    await startConversation(client)
   }
 }
 
-async function getInitConfig(): Promise<{
-  openApiKey: string;
-  temperature: number;
-  role: string;
+async function getInitConfig (): Promise<{
+  openApiKey: string
+  temperature: number
+  role: string
 }> {
   // 如果配置文件夹不存在则创建
   if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.mkdirSync(CONFIG_DIR, { recursive: true })
   }
-  const openApiKey = await getApiKey();
+  const openApiKey = await getApiKey()
   // 用户输入思维发散程度和其他信息
   const { temperature, role } = await inquirer.prompt<{ temperature: number, role: string }>([
     {
-      type: "number",
-      name: "temperature",
+      type: 'number',
+      name: 'temperature',
       default: 0.7,
-      message: "思维发散层度（0-2 之间，值越大结果越随机）",
+      message: '思维发散层度（0-2 之间，值越大结果越随机）',
       validate: async (value) => {
         if (value > 2 || value < 0) {
-          return "请输入 0-2 之间的数";
+          return '请输入 0-2 之间的数'
         }
 
-        return true;
-      },
+        return true
+      }
     },
     {
-      type: "autocomplete",
-      name: "role",
+      type: 'autocomplete',
+      name: 'role',
       default: NORMAL,
-      message: "期望 GPT 扮演的角色（可输入关键词搜索）",
+      message: '期望 GPT 扮演的角色（可输入关键词搜索）',
       source: (_: unknown, input: string) => {
         return ROLES.filter(item => item.act.match(input)).map(role => ({
           name: role.act,
           value: role.act
         }))
       }
-      
-    },
-  ]);
+
+    }
+  ])
 
   return {
     openApiKey,
@@ -92,44 +93,44 @@ async function getInitConfig(): Promise<{
   }
 }
 
-async function getApiKey(): Promise<string> {
-  let openApiKey = "";
+async function getApiKey (): Promise<string> {
+  let openApiKey = ''
   // 如果没有输入过 API key 则需要输入
   if (!fs.existsSync(KEY_FILE_PATH)) {
     const { key } = await inquirer.prompt<{ key: string }>([
       {
-        type: "password",
-        name: "key",
-        message: "请输入您的 ChatGPT 的 API key：",
+        type: 'password',
+        name: 'key',
+        message: '请输入您的 ChatGPT 的 API key：',
         validate: async (value) => {
           if (!value) {
-            return "请输入您的 ChatGPT 的 API key!";
+            return '请输入您的 ChatGPT 的 API key!'
           }
-          const client = new ChatGptClient({ apiKey: value });
-          const valid = await client.checkAuth();
+          const client = new ChatGptClient({ apiKey: value })
+          const valid = await client.checkAuth()
 
-          return valid ? true : "请检查网络或 API key 是否正确！";
-        },
-      },
-    ]);
-    successLog("登录成功！\n");
-    openApiKey = key;
+          return valid ? true : '请检查网络或 API key 是否正确！'
+        }
+      }
+    ])
+    successLog('登录成功！\n')
+    openApiKey = key
     // 文件写入
     fs.writeFile(KEY_FILE_PATH, openApiKey, (err) => {
-      if (err) {
-        warningLog(`API key 写入存储失败！错误信息: ${err}`);
+      if (err != null) {
+        warningLog(`API key 写入存储失败！错误信息: ${JSON.stringify(err)}`)
       }
       // 更改文件权限为仅可读
       fs.chmod(KEY_FILE_PATH, 0o444, (err) => {
-        if (err) {
-          warningLog(`更改文件权限失败！错误信息: ${err}`);
+        if (err != null) {
+          warningLog(`更改文件权限失败！错误信息: ${JSON.stringify(err)}`)
         }
-      });
-    });
+      })
+    })
   } else {
-    openApiKey = fs.readFileSync(KEY_FILE_PATH).toString();
+    openApiKey = fs.readFileSync(KEY_FILE_PATH).toString()
   }
-  return openApiKey;
+  return openApiKey
 }
 
-main();
+main()
