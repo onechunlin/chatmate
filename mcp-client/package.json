@@ -1,0 +1,26 @@
+{
+  "name": "mcp-client",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && chmod 755 build/src/index.js",
+    "dev": "node build/src/index.js /Users/wangchunlin/Desktop/github/chatmate/mcp-server/build/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "chalk": "^5.6.0",
+    "dotenv": "^17.2.2",
+    "inquirer": "^12.9.4",
+    "openai": "^5.19.1",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.9",
+    "@types/node": "^24.3.1",
+    "typescript": "^5.9.2"
+  }
+}
