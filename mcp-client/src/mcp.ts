@@ -29,6 +29,7 @@ export class MCPClient {
   private openAi: OpenAI;
   private serverConnections: Map<string, ServerConnection> = new Map();
   private allTools: ChatCompletionFunctionTool[] = [];
+  private conversationHistory: MessageParam[] = []; // 添加对话历史
 
   constructor() {
     const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
@@ -135,16 +136,15 @@ export class MCPClient {
 
   async processQuery(query: string) {
     try {
-      const messages: MessageParam[] = [
-        {
-          role: "user",
-          content: query,
-        },
-      ];
+      // 添加用户消息到对话历史
+      this.conversationHistory.push({
+        role: "user",
+        content: query,
+      });
 
       const response = await this.openAi.chat.completions.create({
         model: "deepseek-chat",
-        messages,
+        messages: this.conversationHistory, // 使用完整的对话历史
         tools: this.allTools,
         tool_choice: "auto",
         stream: false,
@@ -157,6 +157,11 @@ export class MCPClient {
           assistantMessage.tool_calls as ChatCompletionFunctionTool[];
         if (assistantMessage.content) {
           finalText.push(assistantMessage.content);
+          // 添加助手回复到对话历史
+          this.conversationHistory.push({
+            role: "assistant",
+            content: assistantMessage.content,
+          });
         } else if (toolCalls?.length && toolCalls[0].function) {
           const functionTool = toolCalls[0].function;
           const toolName = functionTool.name;
@@ -176,22 +181,33 @@ export class MCPClient {
             `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
           );
 
-          messages.push({
-            role: "user",
-            content: result,
-          });
+          // 创建临时消息数组用于工具调用
+          const tempMessages: MessageParam[] = [
+            ...this.conversationHistory,
+            {
+              role: "user",
+              content: result,
+            },
+          ];
 
           processingSpinner.text = "总结回答";
           processingSpinner.start();
           // 再次调用模型，加入工具调用结果
           const response = await this.openAi.chat.completions.create({
             model: "deepseek-chat",
-            messages,
+            messages: tempMessages,
             stream: false,
           });
           processingSpinner.stop();
 
-          finalText.push(response.choices[0].message.content || "");
+          const finalResponse = response.choices[0].message.content || "";
+          finalText.push(finalResponse);
+
+          // 只添加最终回复到对话历史，简化历史记录
+          this.conversationHistory.push({
+            role: "assistant",
+            content: `${finalText.join("\n")}`,
+          });
         }
       }
 
@@ -200,6 +216,15 @@ export class MCPClient {
       logger.error("Error processing query:", error);
       throw error;
     }
+  }
+
+  clearConversationHistory() {
+    this.conversationHistory = [];
+    logger.info("Conversation history cleared");
+  }
+
+  getConversationHistory(): MessageParam[] {
+    return [...this.conversationHistory]; // 返回副本，避免外部修改
   }
 
   async chatLoop() {
@@ -247,5 +272,6 @@ export class MCPClient {
     }
     this.serverConnections.clear();
     this.allTools = [];
+    this.clearConversationHistory();
   }
 }

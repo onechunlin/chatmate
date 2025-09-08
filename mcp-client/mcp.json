@@ -14,6 +14,12 @@
         "/Users/wangchunlin/Desktop",
         "/Users/wangchunlin/Downloads"
       ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
     }
   }
 }
