@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc && chmod 755 build/src/index.js",
-    "dev": "node build/src/index.js /Users/wangchunlin/Desktop/github/chatmate/mcp-server/build/index.js"
+    "dev": "node build/src/index.js"
   },
   "author": "",
   "license": "ISC",

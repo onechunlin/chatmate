@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "weather": {
+      "command": "node",
+      "args": [
+        "../mcp-server/build/index.js"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/wangchunlin/Desktop",
+        "/Users/wangchunlin/Downloads"
+      ]
+    }
+  }
+}
