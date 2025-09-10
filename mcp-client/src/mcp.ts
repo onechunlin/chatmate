@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import inquirer from "inquirer";
 import {
+  ChatCompletionChunk,
   ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
 } from "openai/resources";
@@ -10,8 +11,13 @@ import ora from "ora";
 import logger from "./logger.js";
 import chalk from "chalk";
 import { ServerConfig, MCPConfig } from "./config.js";
+import { Stream } from "openai/streaming";
 
 export type MessageParam = ChatCompletionMessageParam;
+
+type BasicToolCall = Required<
+  Omit<ChatCompletionChunk.Choice.Delta.ToolCall, "index" | "id">
+>;
 
 interface ServerConnection {
   name: string;
@@ -134,6 +140,106 @@ export class MCPClient {
     return result.content as string;
   }
 
+  private async handleStreamResponse(
+    response: Stream<ChatCompletionChunk>
+  ): Promise<{
+    content: string;
+    toolCalls: BasicToolCall[];
+  }> {
+    let currentContent = "";
+    const pendingToolCalls: BasicToolCall[] = [];
+
+    // 处理流式响应
+    for await (const chunk of response) {
+      const delta = chunk.choices[0]?.delta;
+
+      if (delta.content) {
+        currentContent += delta.content;
+        process.stdout.write(delta.content); // 实时输出内容
+      }
+
+      if (delta.tool_calls) {
+        // 优化的工具调用信息收集
+        for (const toolCall of delta.tool_calls) {
+          const index = toolCall.index;
+
+          // 初始化工具调用对象
+          if (!pendingToolCalls[index]) {
+            pendingToolCalls[index] = {
+              type: toolCall.type || "function",
+              function: { name: "", arguments: "" },
+            } as BasicToolCall;
+          }
+
+          // 累积拼接工具调用信息（流式传输可能分割数据）
+          const currentTool = pendingToolCalls[index];
+
+          // 拼接工具名称（可能分多个chunk传输）
+          if (toolCall.function?.name) {
+            currentTool.function.name += toolCall.function.name;
+          }
+
+          // 拼接参数字符串（可能分多个chunk传输）
+          if (toolCall.function?.arguments) {
+            currentTool.function.arguments += toolCall.function.arguments;
+          }
+        }
+      }
+    }
+
+    console.log(); // 换行
+    return {
+      content: currentContent,
+      toolCalls: pendingToolCalls.filter(Boolean), // 过滤掉空元素
+    };
+  }
+
+  private async handleToolCall(toolCall: BasicToolCall): Promise<string> {
+    if (!toolCall.function || !toolCall.function.name) {
+      throw new Error("Invalid tool call data");
+    }
+    const toolName = toolCall.function.name;
+    const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
+
+    console.log(chalk.blue(`\n🔧 调用工具: ${toolName}`));
+    console.log(chalk.gray(`参数: ${JSON.stringify(toolArgs, null, 2)}`));
+
+    const result = await this.callTool(toolName, toolArgs);
+    return result;
+  }
+
+  private async generateFollowUpResponse(toolResult: string): Promise<string> {
+    // 创建临时消息数组用于工具调用
+    const tempMessages: MessageParam[] = [
+      ...this.conversationHistory,
+      {
+        role: "user",
+        content: toolResult,
+      },
+    ];
+
+    console.log(chalk.blue("\n🤖 生成回答中..."));
+
+    // 再次调用模型，加入工具调用结果 - 也使用流式输出
+    const followUpResponse = await this.openAi.chat.completions.create({
+      model: "deepseek-chat",
+      messages: tempMessages,
+      stream: true,
+    });
+
+    let followUpContent = "";
+    for await (const chunk of followUpResponse) {
+      const delta = chunk.choices[0]?.delta;
+      if (delta?.content) {
+        followUpContent += delta.content;
+        process.stdout.write(delta.content); // 实时输出内容
+      }
+    }
+
+    console.log(); // 换行
+    return followUpContent;
+  }
+
   async processQuery(query: string) {
     try {
       // 添加用户消息到对话历史
@@ -147,68 +253,43 @@ export class MCPClient {
         messages: this.conversationHistory, // 使用完整的对话历史
         tools: this.allTools,
         tool_choice: "auto",
-        stream: false,
+        stream: true, // 启用流式输出
       });
+
       const finalText: string[] = [];
 
-      for (const choice of response.choices) {
-        const assistantMessage = choice.message;
-        const toolCalls =
-          assistantMessage.tool_calls as ChatCompletionFunctionTool[];
-        if (assistantMessage.content) {
-          finalText.push(assistantMessage.content);
-          // 添加助手回复到对话历史
-          this.conversationHistory.push({
-            role: "assistant",
-            content: assistantMessage.content,
-          });
-        } else if (toolCalls?.length && toolCalls[0].function) {
-          const functionTool = toolCalls[0].function;
-          const toolName = functionTool.name;
-          // @ts-ignore
-          const functionArgs = functionTool.arguments;
-          const toolArgs =
-            typeof functionArgs === "string"
-              ? JSON.parse(functionArgs)
-              : functionArgs;
+      // 处理流式响应
+      const streamResult = await this.handleStreamResponse(response);
 
-          processingSpinner.text = `调用工具${toolName}`;
-          processingSpinner.start();
-          const result = await this.callTool(toolName, toolArgs);
-          processingSpinner.stop();
+      // 如果有内容输出，添加到对话历史
+      if (streamResult.content) {
+        finalText.push(streamResult.content);
+        this.conversationHistory.push({
+          role: "assistant",
+          content: streamResult.content,
+        });
+      }
 
-          finalText.push(
-            `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
-          );
+      // 处理工具调用
+      if (streamResult.toolCalls.length > 0) {
+        const toolCall = streamResult.toolCalls[0];
+        const toolName = toolCall.function.name;
+        const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
 
-          // 创建临时消息数组用于工具调用
-          const tempMessages: MessageParam[] = [
-            ...this.conversationHistory,
-            {
-              role: "user",
-              content: result,
-            },
-          ];
+        const result = await this.handleToolCall(toolCall);
 
-          processingSpinner.text = "总结回答";
-          processingSpinner.start();
-          // 再次调用模型，加入工具调用结果
-          const response = await this.openAi.chat.completions.create({
-            model: "deepseek-chat",
-            messages: tempMessages,
-            stream: false,
-          });
-          processingSpinner.stop();
+        finalText.push(
+          `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
+        );
 
-          const finalResponse = response.choices[0].message.content || "";
-          finalText.push(finalResponse);
+        const followUpContent = await this.generateFollowUpResponse(result);
+        finalText.push(followUpContent);
 
-          // 只添加最终回复到对话历史，简化历史记录
-          this.conversationHistory.push({
-            role: "assistant",
-            content: `${finalText.join("\n")}`,
-          });
-        }
+        // 只添加最终回复到对话历史，简化历史记录
+        this.conversationHistory.push({
+          role: "assistant",
+          content: finalText.join("\n"),
+        });
       }
 
       return finalText.join("\n");
@@ -239,21 +320,20 @@ export class MCPClient {
         });
 
         const message = answer.message;
-        processingSpinner.text = `处理查询: "${message.slice(0, 30)}${
-          message.length > 30 ? "..." : ""
-        }"`;
-        processingSpinner.start();
+        console.log(chalk.blue("\n🤖 AI 回答:"));
+
         try {
           const response = await this.processQuery(message);
-          processingSpinner.succeed("查询处理完成");
-          logger.info("\n" + response);
+          console.log(chalk.green("\n✅ 回答完成"));
         } catch (error) {
-          processingSpinner.fail("查询处理失败");
-          throw error;
+          console.log(chalk.red("\n❌ 处理失败"));
+          logger.error("查询处理失败:", error);
         }
+
+        console.log("\n" + chalk.gray("=".repeat(50)) + "\n");
       }
     } catch (error) {
-      logger.error("Chat loop error:", error);
+      logger.log("Chat loop quit:", error);
     }
   }
 
